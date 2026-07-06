@@ -1,0 +1,37 @@
+[project]
+name = "grpo-teacher-training"
+version = "0.1.0"
+description = "Standalone GRPO teacher-training recipes extracted from OPD."
+requires-python = ">=3.10"
+dependencies = [
+  "datasets",
+  "pandas",
+  "pyarrow",
+  "pyyaml",
+  "tensorboard",
+]
+
+[project.optional-dependencies]
+reasoner = [
+  "math-verify",
+]
+training = [
+  "tensordict",
+]
+ifbench = [
+  "absl-py",
+  "emoji",
+  "immutabledict",
+  "langdetect",
+  "nltk",
+  "setuptools<81",
+  "spacy",
+  "syllapy",
+  "unicodedata2",
+]
+
+[tool.setuptools.packages.find]
+include = ["grpo*", "grpo_training*", "mopd_verl*"]
+
+[tool.pytest.ini_options]
+pythonpath = [".", "third_party/verl"]

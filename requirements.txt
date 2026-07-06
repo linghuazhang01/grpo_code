@@ -1,0 +1,17 @@
+pyyaml
+pandas
+pyarrow
+tensorboard
+datasets
+requests
+math-verify
+tensordict
+absl-py
+langdetect
+nltk
+immutabledict
+spacy
+emoji
+syllapy
+unicodedata2
+setuptools<81
