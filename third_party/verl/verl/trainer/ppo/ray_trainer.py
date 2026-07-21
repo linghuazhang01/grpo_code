@@ -956,6 +956,8 @@ class RayPPOTrainer:
     def _save_checkpoint(self):
         from verl.utils.fs import local_mkdir_safe
 
+        from mopd_verl.checkpoints import checkpoint_retention_limit, prune_global_checkpoints
+
         # path: given_path + `/global_step_{global_steps}` + `/actor`
         local_global_step_folder = os.path.join(
             self.config.trainer.default_local_dir, f"global_step_{self.global_steps}"
@@ -1006,12 +1008,28 @@ class RayPPOTrainer:
         dataloader_state_dict = self.train_dataloader.state_dict()
         torch.save(dataloader_state_dict, dataloader_local_path)
 
+        checkpoint_complete_marker = os.path.join(local_global_step_folder, ".complete")
+        with open(checkpoint_complete_marker, "w") as f:
+            f.write(f"{self.global_steps}\n")
+
         # latest checkpointed iteration tracker (for atomic usage)
         local_latest_checkpointed_iteration = os.path.join(
             self.config.trainer.default_local_dir, "latest_checkpointed_iteration.txt"
         )
         with open(local_latest_checkpointed_iteration, "w") as f:
             f.write(str(self.global_steps))
+
+        retention_limit = checkpoint_retention_limit(
+            max_actor_ckpt_to_keep,
+            max_critic_ckpt_to_keep,
+            use_critic=self.use_critic,
+        )
+        removed_checkpoints = prune_global_checkpoints(
+            self.config.trainer.default_local_dir,
+            retention_limit,
+        )
+        for checkpoint_path in removed_checkpoints:
+            print(f"Removed expired checkpoint directory: {checkpoint_path}")
 
     def _load_checkpoint(self):
         if self.config.trainer.resume_mode == "disable":
@@ -1162,6 +1180,13 @@ class RayPPOTrainer:
 
         # load checkpoint before doing anything
         self._load_checkpoint()
+
+        if self.global_steps >= self.total_training_steps:
+            pprint(
+                f"Checkpoint step {self.global_steps} already reached total training steps "
+                f"{self.total_training_steps}; nothing to resume."
+            )
+            return
 
         # perform validation before training
         # currently, we only support validation using the reward_function.

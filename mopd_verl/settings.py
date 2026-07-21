@@ -1,4 +1,4 @@
-"""Typed configuration for the math+code MOPD verl launcher."""
+"""Typed configuration for the mopd_verl GRPO launcher."""
 
 from __future__ import annotations
 
@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+
+from mopd_verl.config_validation import validate_mopd_config
 
 DEFAULT_PAPER_EVAL_DATASETS = [
     "aime24",
@@ -51,6 +53,8 @@ class ModelConfig:
     primary_teacher_path: str
     secondary_teacher_path: str | None
     teacher_model_device: str = "cpu"
+    attn_implementation: str = "flash_attention_2"
+    use_remove_padding: bool = False
 
 
 @dataclass(frozen=True)
@@ -78,13 +82,14 @@ class ActorConfig:
     ppo_micro_batch_size_per_gpu: int = 1
     use_dynamic_bsz: bool = False
     use_kl_loss: bool = True
-    kl_loss_coef: int = 0
+    kl_loss_coef: float = 0.0
     kl_loss_type: str = "low_var_kl"
-    entropy_coeff: int = 0
+    entropy_coeff: float = 0.0
     ppo_max_token_len_per_gpu: int = 32768
     gradient_checkpointing: bool = True
     param_offload: bool = False
     optimizer_offload: bool = False
+    model_dtype: str = "fp32"
     fsdp_size: int | None = None
 
 
@@ -242,7 +247,7 @@ class RuntimeConfig:
     verl_module: str = "verl.trainer.main_ppo"
     wandb_mode: str = "online"
     wandb_entity: str | None = None
-    env_file: str | None = None
+    env_file: str | None = ".env.local"
     used_model: str = "no_api"
 
 
@@ -382,6 +387,14 @@ def load_config(path: str | Path) -> MOPDConfig:
         teacher_model_device = "gpu"
     if teacher_model_device not in {"cpu", "gpu"}:
         raise ValueError("Expected model.teacher_model_device to be one of: 'cpu', 'gpu', or 'cuda'.")
+    attn_implementation = str(
+        model_raw.get("attn_implementation", ModelConfig.attn_implementation)
+    ).strip()
+    if attn_implementation not in {"eager", "sdpa", "flash_attention_2"}:
+        raise ValueError(
+            "Expected model.attn_implementation to be one of: "
+            "'flash_attention_2', 'sdpa', or 'eager'."
+        )
     model = ModelConfig(
         student_path=str(model_raw["student_path"]),
         student_base_path=(
@@ -399,9 +412,13 @@ def load_config(path: str | Path) -> MOPDConfig:
         primary_teacher_path=str(primary_teacher_raw),
         secondary_teacher_path=(None if secondary_teacher_raw is None else str(secondary_teacher_raw)),
         teacher_model_device=teacher_model_device,
+        attn_implementation=attn_implementation,
+        use_remove_padding=bool(
+            model_raw.get("use_remove_padding", ModelConfig.use_remove_padding)
+        ),
     )
 
-    return MOPDConfig(
+    config = MOPDConfig(
         data=data,
         model=model,
         actor=ActorConfig(**_expect_mapping(root.get("actor", {}), "actor")),
@@ -435,3 +452,5 @@ def load_config(path: str | Path) -> MOPDConfig:
         runtime=RuntimeConfig(**_expect_mapping(root.get("runtime", {}), "runtime")),
         extra_overrides=_string_list(root.get("extra_overrides", []), "extra_overrides"),
     )
+    validate_mopd_config(config)
+    return config

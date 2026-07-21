@@ -4,6 +4,7 @@ runtime:
   python_bin: python3
   verl_module: verl.trainer.main_ppo
   wandb_mode: online
+  env_file: .env.local
   used_model: no_api
 
 data:
@@ -11,10 +12,11 @@ data:
     - data/M2RL/if/train.parquet
   val_files:
     - eval/domains/ifbench/data/IFBench_test.parquet
-  train_batch_size: 2048
-  val_batch_size: 512
+  # M2RL uses 128 prompts × 16 rollouts = 2048 trajectories per update.
+  train_batch_size: 128
+  val_batch_size: 64
   max_prompt_length: 2048
-  max_response_length: 32768
+  max_response_length: 16384
   filter_overlong_prompts: true
   truncation: error
   shuffle: true
@@ -29,6 +31,8 @@ model:
   primary_teacher_path: Qwen/Qwen3-4B
   secondary_teacher_path: null
   teacher_model_device: cpu
+  attn_implementation: flash_attention_2
+  use_remove_padding: false
 
 actor:
   learning_rate: "5e-7"
@@ -36,31 +40,33 @@ actor:
   only_reverse_kl_advantages: false
   lambda_vals: 1.0
   multi_teacher_distill: false
-  ppo_mini_batch_size: 256
+  ppo_mini_batch_size: 128
   ppo_micro_batch_size_per_gpu: 1
   use_dynamic_bsz: true
   use_kl_loss: true
   kl_loss_coef: 0.0001
   kl_loss_type: low_var_kl
   entropy_coeff: 0.001
-  ppo_max_token_len_per_gpu: 34816
+  ppo_max_token_len_per_gpu: 18432
   gradient_checkpointing: true
-  param_offload: true
-  optimizer_offload: true
+  param_offload: false
+  optimizer_offload: false
+  # verl requires FP32 actor initialization so Adam states are not created in BF16.
+  model_dtype: fp32
 
 rollout:
   calculate_log_probs: true
   log_prob_micro_batch_size_per_gpu: 1
-  tensor_model_parallel_size: 2
+  tensor_model_parallel_size: 1
   name: vllm
   mode: sync
-  gpu_memory_utilization: 0.7
+  gpu_memory_utilization: 0.75
   enforce_eager: false
   enable_chunked_prefill: true
   n: 16
-  max_model_len: 34816
-  max_num_batched_tokens: 34816
-  max_num_seqs: 128
+  max_model_len: 18432
+  max_num_batched_tokens: 32768
+  max_num_seqs: 32
   temperature: 1.0
   top_p: 1.0
   val_n: 1
@@ -81,11 +87,13 @@ trainer:
   logger: '["console","wandb"]'
   n_gpus_per_node: 8
   nnodes: 1
-  save_freq: 20
-  default_local_dir: checkpoints/qwen4b-non-thinking-m2rl-if-grpo
-  test_freq: 5
-  total_epochs: 1
-  total_training_steps: null
+  save_freq: 10
+  default_local_dir: checkpoints/qwen4b-m2rl-if-8gpu-141gb-16k
+  test_freq: 50
+  total_epochs: 10
+  total_training_steps: 1200
+  max_actor_ckpt_to_keep: 5
+  max_critic_ckpt_to_keep: 5
   critic_warmup: 0
   val_before_train: true
   log_val_generations: 10
@@ -96,4 +104,3 @@ extra_overrides:
   - algorithm.kl_ctrl.kl_coef=0.001
   - actor_rollout_ref.actor.clip_ratio=0.2
   - actor_rollout_ref.actor.clip_ratio_c=10
-

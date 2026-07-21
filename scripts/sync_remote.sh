@@ -24,6 +24,10 @@ fi
 RSYNC_EXCLUDES=(
   --exclude ".git/"
   --exclude ".venv/"
+  --include "/.env.example"
+  --include "/.env.local.example"
+  --exclude ".env"
+  --exclude ".env.*"
   --exclude "__pycache__/"
   --exclude "*.pyc"
   --exclude ".DS_Store"

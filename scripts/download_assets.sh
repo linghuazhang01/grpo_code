@@ -185,7 +185,7 @@ prepare_m2rl_if_source() {
     echo "Missing IF source file: ${source_path}" >&2
     return 1
   fi
-  python -m grpo_training.prepare_data prepare-m2rl \
+  python -m mopd_verl.prepare_data prepare-m2rl \
     --input "${source_path}" \
     --output "${output_path}" \
     --rm-type ifbench \
@@ -204,7 +204,7 @@ prepare_m2rl_science_source() {
     echo "Missing science source file: ${source_path}" >&2
     return 1
   fi
-  python -m grpo_training.prepare_data prepare-m2rl \
+  python -m mopd_verl.prepare_data prepare-m2rl \
     --input "${source_path}" \
     --output "${output_path}" \
     --rm-type gpqa \

@@ -16,6 +16,8 @@ Environment:
   GRPO_CONFIG=<default config when config arg is omitted>
   VERL_RUNTIME_DIR=<vendored verl runtime dir>
   PYTHON=<python executable, defaults to python3>
+  WANDB_API_KEY=<optional shell override; otherwise loaded from .env.local>
+  WANDB_MODE=<optional shell override; otherwise loaded from .env.local/config>
 USAGE
 }
 
@@ -86,4 +88,4 @@ if [[ "${#EXTRA_ARGS[@]}" -gt 0 ]]; then
   ARGS+=(-- "${EXTRA_ARGS[@]}")
 fi
 
-exec "${PYTHON_BIN}" -m grpo_training.launch "${ARGS[@]}"
+exec "${PYTHON_BIN}" -m mopd_verl.launch "${ARGS[@]}"

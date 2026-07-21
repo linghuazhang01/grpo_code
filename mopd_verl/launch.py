@@ -1,4 +1,4 @@
-"""Build and run verl commands for two-domain Multi-Teacher OPD."""
+"""Build and run verl GRPO training commands."""
 
 from __future__ import annotations
 
@@ -228,7 +228,8 @@ def build_overrides(config: MOPDConfig) -> list[str]:
         *model_overrides,
         f"actor_rollout_ref.actor.optim.lr={actor.learning_rate}",
         f"actor_rollout_ref.actor.optim.lr_warmup_steps_ratio={actor.lr_warmup_steps_ratio}",
-        "actor_rollout_ref.model.use_remove_padding=True",
+        "actor_rollout_ref.model.use_remove_padding="
+        f"{_bool(model.use_remove_padding)}",
         f"actor_rollout_ref.actor.policy_loss.only_reverse_kl_advantages={_bool(actor.only_reverse_kl_advantages)}",
         f"actor_rollout_ref.actor.policy_loss.lambda_vals={actor.lambda_vals}",
         f"actor_rollout_ref.actor.policy_loss.multi_teacher_distill={str(actor.multi_teacher_distill).lower()}",
@@ -256,10 +257,11 @@ def build_overrides(config: MOPDConfig) -> list[str]:
         f"actor_rollout_ref.actor.entropy_coeff={actor.entropy_coeff}",
         f"actor_rollout_ref.actor.ppo_max_token_len_per_gpu={actor.ppo_max_token_len_per_gpu}",
         f"actor_rollout_ref.model.enable_gradient_checkpointing={_bool(actor.gradient_checkpointing)}",
-        "+actor_rollout_ref.model.override_config.attn_implementation=eager",
+        "+actor_rollout_ref.model.override_config.attn_implementation="
+        f"{model.attn_implementation}",
         f"actor_rollout_ref.actor.fsdp_config.param_offload={_bool(actor.param_offload)}",
         f"actor_rollout_ref.actor.fsdp_config.optimizer_offload={_bool(actor.optimizer_offload)}",
-        "actor_rollout_ref.actor.fsdp_config.model_dtype=bfloat16",
+        f"actor_rollout_ref.actor.fsdp_config.model_dtype={actor.model_dtype}",
         *(
             [f"actor_rollout_ref.actor.fsdp_config.fsdp_size={actor.fsdp_size}"]
             if actor.fsdp_size is not None
@@ -302,8 +304,8 @@ def build_overrides(config: MOPDConfig) -> list[str]:
         f"trainer.test_freq={trainer.test_freq}",
         f"trainer.total_epochs={trainer.total_epochs}",
         f"trainer.total_training_steps={_hydra_scalar(trainer.total_training_steps)}",
-        f"+trainer.max_actor_ckpt_to_keep={_hydra_scalar(trainer.max_actor_ckpt_to_keep)}",
-        f"+trainer.max_critic_ckpt_to_keep={_hydra_scalar(trainer.max_critic_ckpt_to_keep)}",
+        f"trainer.max_actor_ckpt_to_keep={_hydra_scalar(trainer.max_actor_ckpt_to_keep)}",
+        f"trainer.max_critic_ckpt_to_keep={_hydra_scalar(trainer.max_critic_ckpt_to_keep)}",
     ]
     overrides.extend(ray_overrides)
     overrides.extend(vllm_engine_overrides)
@@ -338,7 +340,7 @@ def _read_env_file(path: str | None) -> dict[str, str]:
 
     env_path = Path(path).expanduser()
     if not env_path.is_absolute():
-        env_path = Path.cwd() / env_path
+        env_path = Path(__file__).resolve().parents[1] / env_path
     if not env_path.exists():
         return {}
 
@@ -365,13 +367,12 @@ def _read_env_file(path: str | None) -> dict[str, str]:
 
 def run_command(command: Sequence[str], config: MOPDConfig) -> int:
     env = os.environ.copy()
-    shell_env = set(env)
     for key, value in _read_env_file(config.runtime.env_file).items():
         env.setdefault(key, value)
     env.setdefault("PYTHONUNBUFFERED", "1")
     env.setdefault("PYTHONINTMAXSTRDIGITS", "0")
-    if config.runtime.wandb_entity is not None and "WANDB_ENTITY" not in shell_env:
-        env["WANDB_ENTITY"] = config.runtime.wandb_entity
+    if config.runtime.wandb_entity is not None:
+        env.setdefault("WANDB_ENTITY", config.runtime.wandb_entity)
     env.setdefault("WANDB_MODE", config.runtime.wandb_mode)
     env.setdefault("USED_MODEL", config.runtime.used_model)
     return subprocess.call(list(command), env=env)
@@ -381,8 +382,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--config",
-        default=str(Path(__file__).resolve().parents[1] / "configs" / "mopd_formal_audit_all_2gpu.yaml"),
-        help="Path to a MOPD YAML config.",
+        default=str(Path(__file__).resolve().parents[1] / "grpo" / "configs" / "m2rl_if_science_mix.yaml"),
+        help="Path to a GRPO YAML config.",
     )
     parser.add_argument("--dry-run", action="store_true", help="Print the verl command without executing it.")
     parser.add_argument("extra", nargs=argparse.REMAINDER, help="Extra Hydra overrides after '--'.")

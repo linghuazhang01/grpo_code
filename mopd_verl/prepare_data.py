@@ -7,29 +7,40 @@ import json
 import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from importlib import import_module
 from pathlib import Path
+from types import ModuleType
 from typing import Any
 
 import pandas as pd
 
-from eval.data_prep.paper_eval import (
-    evalplus_jsonl_to_verl_parquet,
-    lcb_jsonl_to_verl_parquet,
-    math_eval_jsonl_to_verl_parquet,
-    prepare_paper_eval_data,
-)
+from grpo.data.m2rl import SUPPORTED_RM_TYPES, m2rl_to_verl_parquet
 from mopd_verl.general_reasoner_data import (
     DEFAULT_DATASET_NAME as GENERAL_REASONER_DATASET_NAME,
     general_reasoner_to_verl_parquet,
     prepare_general_reasoner_hf_dataset,
 )
 from mopd_verl.searchqa_data import searchqa_to_verl_parquet
-from grpo.data.toolrl import toolrl_to_verl_parquet
 
 if hasattr(sys, "set_int_max_str_digits"):
     sys.set_int_max_str_digits(0)
 
-VALID_TEACHERS = {"math", "code", "reasoning", "search", "tool"}
+VALID_TEACHERS = {"math", "code", "reasoning", "search", "tool", "if", "science"}
+
+
+def _load_optional_module(module_name: str, command: str) -> ModuleType:
+    try:
+        return import_module(module_name)
+    except ModuleNotFoundError as exc:
+        missing_name = exc.name
+        target_is_missing = missing_name == module_name or (
+            missing_name is not None and module_name.startswith(f"{missing_name}.")
+        )
+        if not target_is_missing:
+            raise
+        raise RuntimeError(
+            f"{command} requires the optional {module_name} module."
+        ) from exc
 
 
 @dataclass(frozen=True)
@@ -198,6 +209,19 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     inspect_parser = subparsers.add_parser("inspect", help="Count opd_teacher labels in a parquet file.")
     inspect_parser.add_argument("path", help="Parquet file to inspect.")
 
+    m2rl_parser = subparsers.add_parser(
+        "prepare-m2rl",
+        help="Convert M2RL IFBench/Science parquet, JSON, or JSONL to verl schema.",
+    )
+    m2rl_parser.add_argument("--input", required=True, help="Input .parquet, .json, or .jsonl file.")
+    m2rl_parser.add_argument("--output", required=True, help="Output verl parquet file.")
+    m2rl_parser.add_argument("--rm-type", required=True, choices=sorted(SUPPORTED_RM_TYPES))
+    m2rl_parser.add_argument("--split", default="train", help="Split name to record in extra_info.")
+    m2rl_parser.add_argument("--domain", default=None, choices=["if", "science"], help="Domain/teacher label.")
+    m2rl_parser.add_argument("--teacher", default=None, choices=["if", "science"], help="Alias for --domain.")
+    m2rl_parser.add_argument("--data-source", default=None, help="Data source tag for reward dispatch.")
+    m2rl_parser.add_argument("--max-samples", type=int, default=None, help="Optional cap for quick tests.")
+
     paper_eval_parser = subparsers.add_parser(
         "prepare-paper-eval",
         help="Convert paper math eval JSONL files into verl validation parquet files.",
@@ -266,8 +290,37 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
+    if args.command == "prepare-m2rl":
+        domain = args.domain or args.teacher or ("if" if args.rm_type == "ifbench" else "science")
+        report = m2rl_to_verl_parquet(
+            args.input,
+            args.output,
+            rm_type=args.rm_type,
+            split=args.split,
+            domain=domain,
+            data_source=args.data_source,
+            max_samples=args.max_samples,
+        )
+        if not report.is_valid:
+            sys.stdout.write(json.dumps(report.to_dict(), sort_keys=True) + "\n")
+            return 1
+        validation = validate_teacher_labels(args.output)
+        sample_validation = validate_sample_ids(args.output)
+        payload = {
+            "count": report.count,
+            "counts": validation.counts,
+            "invalid_rows": validation.invalid_rows[:20],
+            "sample_id_duplicate_count": sample_validation.duplicate_count,
+            "sample_id_invalid_rows": sample_validation.invalid_rows[:20],
+            "m2rl_schema": report.to_dict(),
+        }
+        sys.stdout.write(json.dumps(payload, sort_keys=True) + "\n")
+        return 0 if validation.is_valid and sample_validation.is_valid else 1
     if args.command == "prepare-paper-eval":
-        counts = prepare_paper_eval_data(args.gopd_dir, args.output_root)
+        paper_eval_module = _load_optional_module(
+            "eval.data_prep.paper_eval", "prepare-paper-eval"
+        )
+        counts = paper_eval_module.prepare_paper_eval_data(args.gopd_dir, args.output_root)
         sys.stdout.write(json.dumps({"counts": counts}, sort_keys=True) + "\n")
         return 0
     if args.command == "prepare-searchqa":
@@ -318,7 +371,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         sys.stdout.write(json.dumps(payload, sort_keys=True) + "\n")
         return 0
     if args.command == "prepare-toolrl":
-        count = toolrl_to_verl_parquet(
+        toolrl_module = _load_optional_module("grpo.data.toolrl", "prepare-toolrl")
+        count = toolrl_module.toolrl_to_verl_parquet(
             args.input,
             args.output,
             split=args.split,

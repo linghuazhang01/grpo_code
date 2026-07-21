@@ -5,14 +5,22 @@ __pycache__/
 .env
 .env.*
 !.env.example
+!.env.local.example
 scripts/ssh.sh
 scripts/ssh.local.sh
 
 .venv/
+.aris/
 outputs/
 logs/
 checkpoints/
 data/
+!grpo/data/
+!grpo/data/**
+grpo/data/**/__pycache__/
+grpo/data/**/*.py[cod]
+!third_party/verl/verl/trainer/config/data/
+!third_party/verl/verl/trainer/config/data/**
 models/
 IFBench/
 eval/**/*.parquet

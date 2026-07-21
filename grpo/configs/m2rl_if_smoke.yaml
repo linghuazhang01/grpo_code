@@ -4,6 +4,7 @@ runtime:
   python_bin: python3
   verl_module: verl.trainer.main_ppo
   wandb_mode: disabled
+  env_file: .env.local
   used_model: no_api
 
 data:
@@ -29,6 +30,8 @@ model:
   primary_teacher_path: Qwen/Qwen3-4B
   secondary_teacher_path: null
   teacher_model_device: cpu
+  attn_implementation: flash_attention_2
+  use_remove_padding: false
 
 actor:
   learning_rate: "5e-7"
@@ -92,7 +95,6 @@ trainer:
 
 extra_overrides:
   - data.dataloader_num_workers=0
-  - actor_rollout_ref.model.use_remove_padding=False
   - custom_reward_function.path=grpo/rewards/m2rl.py
   - custom_reward_function.name=compute_score
   - algorithm.kl_ctrl.kl_coef=0.001

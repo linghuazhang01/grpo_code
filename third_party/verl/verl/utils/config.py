@@ -86,6 +86,58 @@ def validate_config(
     # number of GPUs total
     n_gpus = config.trainer.n_gpus_per_node * config.trainer.nnodes
 
+    rollout_n = config.actor_rollout_ref.rollout.n
+    train_rollout_batch_size = config.data.train_batch_size * rollout_n
+    actor_rollout_batch_size = config.actor_rollout_ref.actor.ppo_mini_batch_size * rollout_n
+    tensor_parallel_size = config.actor_rollout_ref.rollout.tensor_model_parallel_size
+    sequence_length = config.data.max_prompt_length + config.data.max_response_length
+    actor_token_limit = config.actor_rollout_ref.actor.ppo_max_token_len_per_gpu
+    rollout_model_limit = config.actor_rollout_ref.rollout.get("max_model_len", None)
+    actor_model_dtype = config.actor_rollout_ref.actor.fsdp_config.get("model_dtype", None)
+
+    if n_gpus <= 0 or rollout_n <= 0 or tensor_parallel_size <= 0:
+        raise ValueError(
+            "Total GPUs, rollout.n, and rollout tensor parallel size must all be positive."
+        )
+    if train_rollout_batch_size % n_gpus != 0:
+        raise ValueError(
+            f"data.train_batch_size * rollout.n ({train_rollout_batch_size}) must be divisible "
+            f"by total GPUs ({n_gpus})."
+        )
+    if actor_rollout_batch_size % n_gpus != 0:
+        raise ValueError(
+            f"actor.ppo_mini_batch_size * rollout.n ({actor_rollout_batch_size}) must be "
+            f"divisible by total GPUs ({n_gpus})."
+        )
+    if n_gpus % tensor_parallel_size != 0:
+        raise ValueError(
+            f"Total GPUs ({n_gpus}) must be divisible by rollout tensor parallel size "
+            f"({tensor_parallel_size})."
+        )
+    if actor_token_limit < sequence_length:
+        raise ValueError(
+            f"Actor token limit ({actor_token_limit}) must cover max prompt + response "
+            f"length ({sequence_length})."
+        )
+    if rollout_model_limit is not None and rollout_model_limit < sequence_length:
+        raise ValueError(
+            f"Rollout max_model_len ({rollout_model_limit}) must cover max prompt + response "
+            f"length ({sequence_length})."
+        )
+    if (
+        config.actor_rollout_ref.rollout.enable_chunked_prefill
+        and rollout_model_limit is not None
+        and config.actor_rollout_ref.rollout.max_num_batched_tokens < rollout_model_limit
+    ):
+        raise ValueError(
+            "rollout.max_num_batched_tokens must be >= rollout.max_model_len when "
+            "chunked prefill is enabled."
+        )
+    if actor_model_dtype not in {None, "fp32", "float32"}:
+        raise ValueError(
+            "FSDP actor model_dtype must be fp32/float32 so optimizer states are initialized in FP32."
+        )
+
     if not config.actor_rollout_ref.actor.use_dynamic_bsz:
         if config.actor_rollout_ref.actor.strategy == "megatron":
             model_parallel_size = (

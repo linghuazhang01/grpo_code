@@ -6,7 +6,9 @@ Active files:
 - `rewards/m2rl.py`: dispatches IFBench strict reward and GPQA multiple-choice reward.
 - `configs/m2rl_if.yaml`: IF-only GRPO.
 - `configs/m2rl_science.yaml`: Science-only GRPO.
+- `configs/m2rl_science_smoke_2gpu.yaml`: two-step Science smoke run on 2 GPUs.
 - `configs/m2rl_if_science_mix.yaml`: mixed IF + Science GRPO.
 
-The active context setting is `2048 + 32768 = 34816` tokens with rollout `n=16`.
-
+The Science and IF production configs use `2048 + 16384 = 18432` tokens,
+128 prompts per update, and rollout `n=16` (2048 trajectories). The separate
+2-GPU smoke config uses a 512-token response and runs only two training steps.

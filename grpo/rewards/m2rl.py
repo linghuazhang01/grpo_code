@@ -151,8 +151,13 @@ def compute_ifbench_reward(response: str, metadata: Mapping[str, Any] | None = N
 
     prompt_text = str(metadata.get("prompt_text") or metadata.get("prompt") or "")
     kwargs_list = _coerce_kwargs_list(metadata.get("kwargs"), len(instruction_ids))
+    raw_record_id = metadata.get("record_id") or metadata.get("key") or 0
+    try:
+        record_id = int(raw_record_id)
+    except (TypeError, ValueError):
+        record_id = str(raw_record_id)
     input_example = evaluation_lib.InputExample(
-        key=int(metadata.get("record_id") or metadata.get("key") or 0),
+        key=record_id,
         instruction_id_list=instruction_ids,
         prompt=prompt_text,
         kwargs=kwargs_list,
@@ -173,29 +178,71 @@ def _normalize_text(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
 
 
-def _extract_letter_from_response(response: str, valid_letters: Iterable[str]) -> str | None:
+def _letter_from_match(match: re.Match[str], valid_letters: set[str]) -> str | None:
+    for group_index in range(1, len(match.groups()) + 1):
+        value = match.group(group_index)
+        if value is None:
+            continue
+        letter = value.strip().upper()
+        if len(letter) != 1 or letter not in valid_letters:
+            continue
+        start, end = match.span(group_index)
+        previous_char = match.string[start - 1] if start > 0 else ""
+        next_char = match.string[end] if end < len(match.string) else ""
+        if previous_char.isalnum() or previous_char == "_":
+            continue
+        if next_char.isalnum() or next_char == "_":
+            continue
+        return letter
+    return None
+
+
+def _extract_letter_from_response(
+    response: str,
+    valid_letters: Iterable[str],
+    output_regex: str | None = None,
+) -> str | None:
     if not response:
         return None
     text = _strip_chain_of_thought(response)
-    patterns = [
-        r"(?:answer|option|choice)\s*(?:is|:)?\s*([A-Z])",
-        r"([A-Z])\s*(?:is\s*(?:the)?\s*correct)",
-        r"final\s*(?:answer|option)\s*(?:is|:)?\s*([A-Z])",
-    ]
     valid_set = {letter.upper() for letter in valid_letters}
-    for pattern in patterns:
-        match = re.search(pattern, text, flags=re.IGNORECASE)
-        if match:
-            letter = match.group(1).upper()
-            if letter in valid_set:
-                return letter
+    if output_regex:
+        try:
+            template_matches = re.finditer(output_regex, text, flags=re.IGNORECASE)
+            template_candidates = [
+                (match.start(), letter)
+                for match in template_matches
+                if (letter := _letter_from_match(match, valid_set)) is not None
+            ]
+        except re.error:
+            template_candidates = []
+        if template_candidates:
+            return max(template_candidates, key=lambda item: item[0])[1]
 
-    candidates = re.findall(r"\b([A-Z])\b", text)
-    for letter in reversed(candidates):
-        letter = letter.upper()
+    patterns = [
+        r"\\boxed\s*\{\s*([A-Z])\s*\}",
+        r"<final_answer>\s*([A-Z])\s*</final_answer>",
+        r"(?:final\s*)?(?:answer|option|choice)\s*(?:is|:|=)?\s*([A-Z])(?![A-Z0-9_/])",
+        r"\b([A-Z])\b\s+is\s+(?:the\s+)?correct(?:\s+(?:answer|option|choice))?",
+    ]
+    candidates: list[tuple[int, str]] = []
+    for pattern in patterns:
+        for match in re.finditer(pattern, text, flags=re.IGNORECASE):
+            letter = _letter_from_match(match, valid_set)
+            if letter is not None:
+                candidates.append((match.start(), letter))
+
+    fallback_text = re.sub(
+        r"\b[A-Z](?:\s*/\s*[A-Z])+\b",
+        lambda match: " " * len(match.group(0)),
+        text,
+        flags=re.IGNORECASE,
+    )
+    for match in re.finditer(r"\b([A-Z])\b", fallback_text):
+        letter = match.group(1).upper()
         if letter in valid_set:
-            return letter
-    return None
+            candidates.append((match.start(), letter))
+    return max(candidates, key=lambda item: item[0])[1] if candidates else None
 
 
 def _choices_from_metadata(metadata: Mapping[str, Any]) -> list[Any] | None:
@@ -212,6 +259,46 @@ def _choices_from_metadata(metadata: Mapping[str, Any]) -> list[Any] | None:
     return None
 
 
+def _normalize_valid_letters(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, bytes):
+        value = value.decode(errors="ignore")
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return []
+        try:
+            return _normalize_valid_letters(json.loads(stripped))
+        except json.JSONDecodeError:
+            if re.fullmatch(r"[A-Za-z]+", stripped):
+                entries: list[Any] = list(stripped)
+            else:
+                entries = re.split(r"[\s,;/|]+", stripped)
+    elif isinstance(value, Mapping):
+        entries = list(value.keys())
+    elif isinstance(value, Iterable):
+        try:
+            entries = list(value)
+        except TypeError:
+            item_method = getattr(value, "item", None)
+            if not callable(item_method):
+                return []
+            scalar = item_method()
+            if scalar is value:
+                return []
+            return _normalize_valid_letters(scalar)
+    else:
+        entries = [value]
+
+    normalized: list[str] = []
+    for entry in entries:
+        text = str(entry).strip().upper()
+        if len(text) == 1 and text in string.ascii_uppercase and text not in normalized:
+            normalized.append(text)
+    return normalized
+
+
 def compute_gpqa_reward(response: str, label: Any, metadata: Mapping[str, Any] | None = None) -> float:
     """Rule-based scorer for GPQA-style multiple-choice science QA."""
 
@@ -220,12 +307,10 @@ def compute_gpqa_reward(response: str, label: Any, metadata: Mapping[str, Any] |
 
     metadata = metadata or {}
     choices = _choices_from_metadata(metadata)
-    raw_letters = metadata.get("valid_letters")
-    if raw_letters:
-        valid_letters = [str(letter).upper() for letter in raw_letters]
-    elif choices:
+    valid_letters = _normalize_valid_letters(metadata.get("valid_letters"))
+    if not valid_letters and choices:
         valid_letters = list(string.ascii_uppercase[: len(choices)])
-    else:
+    elif not valid_letters:
         valid_letters = DEFAULT_VALID_LETTERS
 
     correct_letter = metadata.get("correct_letter")
@@ -251,7 +336,13 @@ def compute_gpqa_reward(response: str, label: Any, metadata: Mapping[str, Any] |
                 correct_letter = valid_letters[index]
                 break
 
-    extracted_letter = _extract_letter_from_response(response, valid_letters)
+    template_metadata = metadata.get("template_metadata")
+    output_regex = template_metadata.get("output_regex") if isinstance(template_metadata, Mapping) else None
+    extracted_letter = _extract_letter_from_response(
+        response,
+        valid_letters,
+        str(output_regex) if output_regex else None,
+    )
     if extracted_letter and correct_letter:
         return 1.0 if extracted_letter == correct_letter else 0.0
     if extracted_letter and not correct_letter and label_text:
