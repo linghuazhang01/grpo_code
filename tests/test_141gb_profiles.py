@@ -6,6 +6,8 @@ import subprocess
 import unittest
 from pathlib import Path
 
+from mopd_verl.settings import load_config
+
 
 class LargeGpuTrainingProfileTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -60,17 +62,52 @@ class LargeGpuTrainingProfileTests(unittest.TestCase):
                 self.assertEqual(overrides["actor_rollout_ref.rollout.n"], "16")
                 self.assertEqual(overrides["actor_rollout_ref.rollout.tensor_model_parallel_size"], "1")
                 self.assertEqual(overrides["actor_rollout_ref.actor.fsdp_config.model_dtype"], "fp32")
+                self.assertEqual(overrides["actor_rollout_ref.actor.use_kl_loss"], "False")
+                self.assertEqual(overrides["actor_rollout_ref.actor.kl_loss_coef"], "0.0")
+                self.assertEqual(overrides["actor_rollout_ref.actor.entropy_coeff"], "0.0")
+                self.assertEqual(overrides["algorithm.use_kl_in_reward"], "False")
+                self.assertEqual(overrides["algorithm.kl_ctrl.kl_coef"], "0.0")
+                self.assertEqual(overrides["actor_rollout_ref.ref.fsdp_config.param_offload"], "False")
+                self.assertEqual(overrides["algorithm.rollout_correction.rollout_is_threshold"], "5.0")
                 self.assertEqual(overrides["trainer.save_freq"], "10")
                 self.assertEqual(overrides["trainer.max_actor_ckpt_to_keep"], "5")
                 self.assertEqual(overrides["trainer.max_critic_ckpt_to_keep"], "5")
                 self.assertEqual(overrides["trainer.total_training_steps"], "1200")
+                self.assertEqual(overrides["trainer.test_freq"], "20")
+                self.assertEqual(overrides["trainer.resume_mode"], "auto")
                 self.assertIn(domain, overrides["trainer.experiment_name"])
+                self.assertIn(f"{gpu_count}gpu", overrides["trainer.experiment_name"])
 
                 rollout_batch_size = train_batch_size * int(
                     overrides["actor_rollout_ref.rollout.n"]
                 )
                 self.assertEqual(rollout_batch_size, expected_trajectories)
                 self.assertEqual(rollout_batch_size % gpu_count, 0)
+
+    def test_each_141gb_profile_has_a_standalone_config(self) -> None:
+        cases = {
+            "m2rl_science_6gpu_141gb.yaml": (6, 126, "science"),
+            "m2rl_science_8gpu_141gb.yaml": (8, 128, "science"),
+            "m2rl_if_6gpu_141gb.yaml": (6, 126, "if"),
+            "m2rl_if_8gpu_141gb.yaml": (8, 128, "if"),
+        }
+
+        for filename, (gpu_count, prompt_batch, domain) in cases.items():
+            with self.subTest(config=filename):
+                config = load_config(self.project_root / "grpo/configs" / filename)
+                self.assertEqual(config.trainer.n_gpus_per_node, gpu_count)
+                self.assertEqual(config.data.train_batch_size, prompt_batch)
+                self.assertEqual(config.actor.ppo_mini_batch_size, prompt_batch)
+                self.assertEqual(config.rollout.n, 16)
+                self.assertEqual(config.data.max_response_length, 16384)
+                self.assertFalse(config.actor.use_kl_loss)
+                self.assertEqual(config.actor.kl_loss_coef, 0.0)
+                self.assertEqual(config.actor.entropy_coeff, 0.0)
+                self.assertEqual(config.trainer.resume_mode, "auto")
+                self.assertEqual(config.trainer.test_freq, 20)
+                self.assertFalse(config.model.reference_param_offload)
+                self.assertEqual(config.rollout_correction.rollout_is_threshold, 5.0)
+                self.assertIn(domain, config.trainer.experiment_name)
 
     def test_two_gpu_science_smoke_profile_is_short_and_memory_bounded(self) -> None:
         overrides = self._dry_run("run_m2rl_science_2gpu_smoke.sh")
@@ -171,6 +208,16 @@ class LargeGpuTrainingProfileTests(unittest.TestCase):
             "+data.apply_chat_template_kwargs.enable_thinking=True",
             "actor_rollout_ref.model.override_config.attn_implementation=eager",
             "actor_rollout_ref.model.use_remove_padding=True",
+            "actor_rollout_ref.actor.use_kl_loss=True",
+            "actor_rollout_ref.actor.kl_loss_coef=0.1",
+            "actor_rollout_ref.actor.entropy_coeff=0.001",
+            "algorithm.use_kl_in_reward=True",
+            "algorithm.kl_ctrl.kl_coef=0.1",
+            "algorithm={use_kl_in_reward:true,kl_ctrl:{type:fixed,kl_coef:0.1}}",
+            "actor_rollout_ref.actor.policy_loss.only_reverse_kl_advantages=True",
+            "actor_rollout_ref.actor.policy_loss.multi_teacher_distill=True",
+            "actor_rollout_ref.actor.policy_loss.loss_mode=kl-cov",
+            "actor_rollout_ref.actor.policy_loss={loss_mode:kl-cov}",
         )
 
         for override in protected_overrides:

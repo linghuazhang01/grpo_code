@@ -324,14 +324,16 @@ scripts/run_m2rl_science_grpo.sh --dry-run -- \
 
 ### 4.2 6/8 × 141 GB GPU 正式训练
 
-Science 与 IF 都提供了独立的 6-GPU、8-GPU 启动脚本：
+Science 与 IF 都提供了独立的完整 YAML 和启动脚本。GPU、batch、context、rollout、
+checkpoint 与训练步数都直接写在对应 YAML 中；公共 wrapper 只覆盖运行时 model/data
+路径与可选 checkpoint 目录：
 
-| Domain | GPUs | Global prompt batch | Validation batch | Rollouts/prompt | Trajectories/GPU/step |
-|---|---:|---:|---:|---:|---:|
-| Science | 6 | 126 | 48 | 16 | 336 |
-| Science | 8 | 128 | 64 | 16 | 256 |
-| IF | 6 | 126 | 48 | 16 | 336 |
-| IF | 8 | 128 | 64 | 16 | 256 |
+| Domain | GPUs | Config | Prompt batch | Validation batch | Rollouts/prompt | Trajectories/GPU/step |
+|---|---:|---|---:|---:|---:|---:|
+| Science | 6 | `grpo/configs/m2rl_science_6gpu_141gb.yaml` | 126 | 48 | 16 | 336 |
+| Science | 8 | `grpo/configs/m2rl_science_8gpu_141gb.yaml` | 128 | 64 | 16 | 256 |
+| IF | 6 | `grpo/configs/m2rl_if_6gpu_141gb.yaml` | 126 | 48 | 16 | 336 |
+| IF | 8 | `grpo/configs/m2rl_if_8gpu_141gb.yaml` | 128 | 64 | 16 | 256 |
 
 M2RL 论文中的 batch 口径是 128 个 prompts、每个 prompt 生成 16 条 rollout，即每次
 update 共 2048 条 trajectories。verl 的 `data.train_batch_size` 表示 prompt 数，不能把
@@ -346,8 +348,12 @@ update 共 2048 条 trajectories。verl 的 `data.train_batch_size` 表示 promp
 - `rollout.n=16`、`tensor_model_parallel_size=1`
 - actor 以 FP32 初始化，避免 Adam optimizer state 被错误创建为 BF16；forward/backward
   仍使用 verl 的 BF16 mixed precision
+- actor parameter/optimizer offload 与 reference parameter offload 均关闭，利用 141 GiB 显存
+- 四份 profile 均关闭 actor KL loss 和 reward KL：`use_kl_loss=false`、
+  `kl_loss_coef=0.0`、`use_kl_in_reward=false`、`algorithm.kl_ctrl.kl_coef=0.0`
+- `entropy_coeff=0.0`，不在 GRPO objective 中加入额外 entropy bonus
 - 每 10 steps 保存一次，最多保留 5 个完整、可恢复的 checkpoint directories
-- `total_training_steps=1200`，validation 每 50 steps 执行一次
+- `total_training_steps=1200`；训练前先 validation，之后每 20 steps 以及最后一步执行
 - 默认 `resume_mode=auto`，相同 checkpoint 目录会自动续训
 
 正式脚本会在分配 GPU 前检查 visible GPU 数量、model/data 文件、M2RL schema；IF

@@ -287,7 +287,8 @@ def build_overrides(config: MOPDConfig) -> list[str]:
         f"actor_rollout_ref.rollout.val_kwargs.top_p={rollout.val_top_p}",
         f"actor_rollout_ref.rollout.val_kwargs.n={rollout.val_n}",
         "actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=1",
-        "actor_rollout_ref.ref.fsdp_config.param_offload=True",
+        "actor_rollout_ref.ref.fsdp_config.param_offload="
+        f"{_bool(model.reference_param_offload)}",
         "actor_rollout_ref.ref.fsdp_config.model_dtype=bfloat16",
         "algorithm.use_kl_in_reward=False",
         "reward_model.reward_manager=naive",
@@ -306,6 +307,7 @@ def build_overrides(config: MOPDConfig) -> list[str]:
         f"trainer.total_training_steps={_hydra_scalar(trainer.total_training_steps)}",
         f"trainer.max_actor_ckpt_to_keep={_hydra_scalar(trainer.max_actor_ckpt_to_keep)}",
         f"trainer.max_critic_ckpt_to_keep={_hydra_scalar(trainer.max_critic_ckpt_to_keep)}",
+        f"trainer.resume_mode={trainer.resume_mode}",
     ]
     overrides.extend(ray_overrides)
     overrides.extend(vllm_engine_overrides)

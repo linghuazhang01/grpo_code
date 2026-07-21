@@ -55,6 +55,7 @@ class ModelConfig:
     teacher_model_device: str = "cpu"
     attn_implementation: str = "flash_attention_2"
     use_remove_padding: bool = False
+    reference_param_offload: bool = True
 
 
 @dataclass(frozen=True)
@@ -225,6 +226,7 @@ class TrainerConfig:
     total_training_steps: int | None = None
     max_actor_ckpt_to_keep: int | None = None
     max_critic_ckpt_to_keep: int | None = None
+    resume_mode: str = "auto"
     critic_warmup: int = 0
     val_before_train: bool = True
     log_val_generations: int = 10
@@ -415,6 +417,12 @@ def load_config(path: str | Path) -> MOPDConfig:
         attn_implementation=attn_implementation,
         use_remove_padding=bool(
             model_raw.get("use_remove_padding", ModelConfig.use_remove_padding)
+        ),
+        reference_param_offload=bool(
+            model_raw.get(
+                "reference_param_offload",
+                ModelConfig.reference_param_offload,
+            )
         ),
     )
 

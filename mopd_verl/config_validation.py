@@ -84,3 +84,7 @@ def validate_mopd_config(config: Any) -> None:
             raise ValueError(f"Expected '{key}' to be positive or null.")
     if trainer.total_training_steps is not None and trainer.total_training_steps <= 0:
         raise ValueError("Expected 'trainer.total_training_steps' to be positive or null.")
+    if trainer.resume_mode not in {"auto", "disable", "resume_path"}:
+        raise ValueError(
+            "Expected 'trainer.resume_mode' to be 'auto', 'disable', or 'resume_path'."
+        )

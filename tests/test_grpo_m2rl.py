@@ -272,6 +272,17 @@ class ScienceConfigTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "data.train_batch_size"):
             validate_mopd_config(invalid)
 
+    def test_config_validation_rejects_unknown_resume_mode(self) -> None:
+        project_root = Path(__file__).resolve().parents[1]
+        config = load_config(project_root / "grpo/configs/m2rl_science.yaml")
+        invalid = replace(
+            config,
+            trainer=replace(config.trainer, resume_mode="latest"),
+        )
+
+        with self.assertRaisesRegex(ValueError, "resume_mode"):
+            validate_mopd_config(invalid)
+
     def test_m2rl_configs_force_safe_flash_attention_two_defaults(self) -> None:
         project_root = Path(__file__).resolve().parents[1]
         config_paths = (
@@ -279,6 +290,10 @@ class ScienceConfigTests(unittest.TestCase):
             "grpo/configs/m2rl_if_smoke.yaml",
             "grpo/configs/m2rl_science.yaml",
             "grpo/configs/m2rl_science_smoke_2gpu.yaml",
+            "grpo/configs/m2rl_science_6gpu_141gb.yaml",
+            "grpo/configs/m2rl_science_8gpu_141gb.yaml",
+            "grpo/configs/m2rl_if_6gpu_141gb.yaml",
+            "grpo/configs/m2rl_if_8gpu_141gb.yaml",
             "grpo/configs/m2rl_if_science_mix.yaml",
         )
 

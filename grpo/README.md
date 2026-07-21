@@ -7,6 +7,8 @@ Active files:
 - `configs/m2rl_if.yaml`: IF-only GRPO.
 - `configs/m2rl_science.yaml`: Science-only GRPO.
 - `configs/m2rl_science_smoke_2gpu.yaml`: two-step Science smoke run on 2 GPUs.
+- `configs/m2rl_science_{6,8}gpu_141gb.yaml`: standalone Science production profiles.
+- `configs/m2rl_if_{6,8}gpu_141gb.yaml`: standalone IF production profiles.
 - `configs/m2rl_if_science_mix.yaml`: mixed IF + Science GRPO.
 
 The Science and IF production configs use `2048 + 16384 = 18432` tokens,

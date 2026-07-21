@@ -39,13 +39,11 @@ EXTRA_OVERRIDES=()
 
 case "${DOMAIN}" in
   science)
-    CONFIG_PATH="${PROJECT_DIR}/grpo/configs/m2rl_science.yaml"
     TRAIN_FILE="${SCIENCE_TRAIN_FILE:-data/M2RL/science/train.parquet}"
     VAL_FILE="${SCIENCE_VAL_FILE:-eval/domains/science/data/gpqa.parquet}"
     EXPERIMENT_BASE="qwen4b-m2rl-science"
     ;;
   if)
-    CONFIG_PATH="${PROJECT_DIR}/grpo/configs/m2rl_if.yaml"
     TRAIN_FILE="${IF_TRAIN_FILE:-data/M2RL/if/train.parquet}"
     VAL_FILE="${IF_VAL_FILE:-eval/domains/ifbench/data/IFBench_test.parquet}"
     EXPERIMENT_BASE="qwen4b-m2rl-if"
@@ -58,13 +56,9 @@ esac
 
 case "${GPU_COUNT}" in
   6)
-    TRAIN_BATCH_SIZE=126
-    VAL_BATCH_SIZE=48
     DEFAULT_VISIBLE_DEVICES="0,1,2,3,4,5"
     ;;
   8)
-    TRAIN_BATCH_SIZE=128
-    VAL_BATCH_SIZE=64
     DEFAULT_VISIBLE_DEVICES="0,1,2,3,4,5,6,7"
     ;;
   *)
@@ -72,6 +66,12 @@ case "${GPU_COUNT}" in
     exit 2
     ;;
 esac
+
+CONFIG_PATH="${PROJECT_DIR}/grpo/configs/m2rl_${DOMAIN}_${GPU_COUNT}gpu_141gb.yaml"
+if [[ ! -f "${CONFIG_PATH}" ]]; then
+  echo "Training profile not found: ${CONFIG_PATH}" >&2
+  exit 2
+fi
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -108,16 +108,19 @@ for override in "${EXTRA_OVERRIDES[@]}"; do
     actor_rollout_ref.model.override_config.attn_implementation|actor_rollout_ref.model.use_remove_padding|\
     actor_rollout_ref.ref|actor_rollout_ref.ref.model|\
     actor_rollout_ref.actor|actor_rollout_ref.actor.fsdp_config|actor_rollout_ref.rollout|trainer|\
+    actor_rollout_ref.actor.policy_loss|actor_rollout_ref.actor.policy_loss.*|\
     data.train_files|data.val_files|data.train_batch_size|data.val_batch_size|data.max_prompt_length|data.max_response_length|\
     actor_rollout_ref.model.path|actor_rollout_ref.model.base_model_path|actor_rollout_ref.ref.model.path|\
     actor_rollout_ref.actor.ppo_mini_batch_size|actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu|\
     actor_rollout_ref.actor.ppo_max_token_len_per_gpu|actor_rollout_ref.actor.use_dynamic_bsz|\
+    actor_rollout_ref.actor.use_kl_loss|actor_rollout_ref.actor.kl_loss_coef|\
+    actor_rollout_ref.actor.entropy_coeff|\
     actor_rollout_ref.actor.fsdp_config.model_dtype|actor_rollout_ref.rollout.tensor_model_parallel_size|\
     actor_rollout_ref.rollout.n|actor_rollout_ref.rollout.max_model_len|\
     actor_rollout_ref.rollout.max_num_batched_tokens|actor_rollout_ref.rollout.max_num_seqs|\
     trainer.n_gpus_per_node|trainer.nnodes|trainer.save_freq|trainer.max_actor_ckpt_to_keep|\
     trainer.max_critic_ckpt_to_keep|trainer.total_training_steps|trainer.default_local_dir|\
-    trainer.experiment_name)
+    trainer.experiment_name|algorithm|algorithm.*)
       echo "Protected 141GB profile setting cannot be overridden: ${override_key}" >&2
       echo "Use the documented GRPO_MODEL_PATH, *_TRAIN_FILE, *_VAL_FILE, or GRPO_CHECKPOINT_DIR variables." >&2
       exit 2
@@ -134,7 +137,6 @@ if [[ "${#VISIBLE_DEVICES[@]}" -ne "${GPU_COUNT}" ]]; then
 fi
 
 CHECKPOINT_DIR="${GRPO_CHECKPOINT_DIR:-checkpoints/${EXPERIMENT_BASE}-${GPU_COUNT}gpu-141gb-16k}"
-EXPERIMENT_NAME="${EXPERIMENT_BASE}-${GPU_COUNT}gpu-141gb-16k"
 
 if [[ "${DRY_RUN_FLAG}" != "1" && "${GRPO_SKIP_PREFLIGHT:-0}" != "1" ]]; then
   ACTUAL_GPU_COUNT="$("${PYTHON:-python3}" -c 'import torch; print(torch.cuda.device_count())')"
@@ -199,41 +201,10 @@ fi
 PROFILE_OVERRIDES=(
   "data.train_files=[\"${TRAIN_FILE}\"]"
   "data.val_files=[\"${VAL_FILE}\"]"
-  "data.train_batch_size=${TRAIN_BATCH_SIZE}"
-  "data.val_batch_size=${VAL_BATCH_SIZE}"
-  "data.max_prompt_length=2048"
-  "data.max_response_length=16384"
   "actor_rollout_ref.model.path=${MODEL_PATH}"
   "actor_rollout_ref.model.base_model_path=${MODEL_PATH}"
   "actor_rollout_ref.ref.model.path=${MODEL_PATH}"
-  "actor_rollout_ref.actor.ppo_mini_batch_size=${TRAIN_BATCH_SIZE}"
-  "actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=1"
-  "actor_rollout_ref.actor.ppo_max_token_len_per_gpu=18432"
-  "actor_rollout_ref.actor.use_dynamic_bsz=True"
-  "actor_rollout_ref.actor.fsdp_config.param_offload=False"
-  "actor_rollout_ref.actor.fsdp_config.optimizer_offload=False"
-  "actor_rollout_ref.ref.fsdp_config.param_offload=False"
-  "actor_rollout_ref.rollout.tensor_model_parallel_size=1"
-  "actor_rollout_ref.rollout.gpu_memory_utilization=0.75"
-  "actor_rollout_ref.rollout.enforce_eager=False"
-  "actor_rollout_ref.rollout.enable_chunked_prefill=True"
-  "actor_rollout_ref.rollout.n=16"
-  "actor_rollout_ref.rollout.max_model_len=18432"
-  "actor_rollout_ref.rollout.max_num_batched_tokens=32768"
-  "actor_rollout_ref.rollout.max_num_seqs=32"
-  "actor_rollout_ref.rollout.val_kwargs.n=1"
-  "actor_rollout_ref.rollout.val_kwargs.do_sample=False"
-  "trainer.n_gpus_per_node=${GPU_COUNT}"
-  "trainer.nnodes=1"
-  "trainer.save_freq=10"
-  "trainer.max_actor_ckpt_to_keep=5"
-  "trainer.max_critic_ckpt_to_keep=5"
-  "trainer.test_freq=50"
-  "trainer.total_epochs=10"
-  "trainer.total_training_steps=1200"
-  "trainer.resume_mode=auto"
   "trainer.default_local_dir=${CHECKPOINT_DIR}"
-  "trainer.experiment_name=${EXPERIMENT_NAME}"
 )
 
 RUN_ARGS=("${CONFIG_PATH}")

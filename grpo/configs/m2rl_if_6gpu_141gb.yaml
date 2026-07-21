@@ -1,0 +1,107 @@
+# IFBench GRPO profile for 6 GPUs with 141 GiB memory each.
+
+runtime:
+  python_bin: python3
+  verl_module: verl.trainer.main_ppo
+  wandb_mode: online
+  env_file: .env.local
+  used_model: no_api
+
+data:
+  train_files:
+    - data/M2RL/if/train.parquet
+  val_files:
+    - eval/domains/ifbench/data/IFBench_test.parquet
+  # 126 prompts × 16 rollouts = 2016 trajectories, divisible by 6 GPUs.
+  train_batch_size: 126
+  val_batch_size: 48
+  max_prompt_length: 2048
+  max_response_length: 16384
+  filter_overlong_prompts: true
+  truncation: error
+  shuffle: true
+  validation_shuffle: false
+  seed: 42
+  return_raw_chat: true
+  enable_thinking: false
+
+model:
+  student_path: Qwen/Qwen3-4B
+  student_base_path: Qwen/Qwen3-4B
+  primary_teacher_path: Qwen/Qwen3-4B
+  secondary_teacher_path: null
+  teacher_model_device: cpu
+  attn_implementation: flash_attention_2
+  use_remove_padding: false
+  reference_param_offload: false
+
+actor:
+  learning_rate: "5e-7"
+  lr_warmup_steps_ratio: 0.0
+  only_reverse_kl_advantages: false
+  lambda_vals: 1.0
+  multi_teacher_distill: false
+  ppo_mini_batch_size: 126
+  ppo_micro_batch_size_per_gpu: 1
+  use_dynamic_bsz: true
+  use_kl_loss: false
+  kl_loss_coef: 0.0
+  kl_loss_type: low_var_kl
+  entropy_coeff: 0.0
+  ppo_max_token_len_per_gpu: 18432
+  gradient_checkpointing: true
+  param_offload: false
+  optimizer_offload: false
+  model_dtype: fp32
+
+rollout:
+  calculate_log_probs: true
+  log_prob_micro_batch_size_per_gpu: 1
+  tensor_model_parallel_size: 1
+  name: vllm
+  mode: sync
+  gpu_memory_utilization: 0.75
+  enforce_eager: false
+  enable_chunked_prefill: true
+  n: 16
+  max_model_len: 18432
+  max_num_batched_tokens: 32768
+  max_num_seqs: 32
+  temperature: 1.0
+  top_p: 1.0
+  val_n: 1
+  val_do_sample: false
+  val_temperature: 0.0
+  val_top_p: 1.0
+  seed: 42
+
+rollout_correction:
+  rollout_is: token
+  rollout_is_threshold: 5.0
+  rollout_rs: null
+  bypass_mode: false
+
+trainer:
+  project_name: grpo-teachers
+  experiment_name: qwen4b-m2rl-if-6gpu-141gb-16k
+  logger: '["console","wandb"]'
+  n_gpus_per_node: 6
+  nnodes: 1
+  save_freq: 10
+  default_local_dir: checkpoints/qwen4b-m2rl-if-6gpu-141gb-16k
+  test_freq: 20
+  total_epochs: 10
+  total_training_steps: 1200
+  max_actor_ckpt_to_keep: 5
+  max_critic_ckpt_to_keep: 5
+  resume_mode: auto
+  critic_warmup: 0
+  val_before_train: true
+  log_val_generations: 10
+
+extra_overrides:
+  - custom_reward_function.path=grpo/rewards/m2rl.py
+  - custom_reward_function.name=compute_score
+  - algorithm.kl_ctrl.kl_coef=0.0
+  - actor_rollout_ref.actor.clip_ratio=0.2
+  - actor_rollout_ref.actor.clip_ratio_c=10
